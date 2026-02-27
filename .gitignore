@@ -1,0 +1,27 @@
+﻿# Dependencies
+node_modules/
+.pnp
+.php.js
+# Testing
+coverage/
+# Production
+build/
+dist/
+# Misc
+.DS_Store
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+# Logs
+npm-debug.log*
+yarn-debut.log*
+yarn-error.log*
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+# Supabase
+.supabase/
