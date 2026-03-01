@@ -21,20 +21,20 @@ serve(async (req) => {
     
     if (lodgesError) throw lodgesError
     
-    console.log(Found \ lodges with Warhorn feeds)
+    console.log(`Found ${lodges.length} lodges with Warhorn feeds`)
     
     const results = []
     
     for (const lodge of lodges) {
       try {
-        console.log(Scraping \...)
+        console.log(`Scraping ${lodge.name}...`)
         
         // Fetch ICS feed
-        const icsUrl = lodge.warhorn_ics_url || \/ics
+        const icsUrl = lodge.warhorn_ics_url || `${lodge.warhorn_url}/ics`
         const response = await fetch(icsUrl)
         
         if (!response.ok) {
-          console.error(Failed to fetch \: \)
+          console.error(`Failed to fetch ${lodge.name}: ${response.status}`)
           continue
         }
         
@@ -45,7 +45,7 @@ serve(async (req) => {
         const comp = new ICAL.Component(jcalData)
         const vevents = comp.getAllSubcomponents('vevent')
         
-        console.log(Found \ events for \)
+        console.log(`Found ${vevents.length} events for ${lodge.name}`)
         
         let eventsProcessed = 0
         
@@ -109,7 +109,7 @@ serve(async (req) => {
               .insert(eventData)
             
             if (insertError) {
-              console.error(Error inserting event: \)
+              console.error(`Error inserting event: ${insertError.message}`)
             } else {
               eventsProcessed++
             }
@@ -123,7 +123,7 @@ serve(async (req) => {
         })
         
       } catch (error) {
-        console.error(Error processing \:, error.message)
+        console.error(`Error processing ${lodge.name}:`, error.message)
         results.push({
           lodge: lodge.name,
           error: error.message
