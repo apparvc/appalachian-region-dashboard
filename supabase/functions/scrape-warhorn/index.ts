@@ -66,7 +66,7 @@ serve(async (req) => {
             last_seen: new Date().toISOString()
           }
           
-          // Detect game system FIRST (helps with subsequent parsing)
+          // Detect game system FIRST
 if (eventData.event_title.match(/PFS2|Pathfinder.*2E|PF2 AP/i)) {
   eventData.game_system = 'PFS2'
 } else if (eventData.event_title.match(/SFS2|Starfinder.*2E|SF2/i)) {
@@ -77,34 +77,54 @@ if (eventData.event_title.match(/PFS2|Pathfinder.*2E|PF2 AP/i)) {
   eventData.game_system = 'SFS1'
 }
 
-// Extract scenario code - multiple patterns
+// Extract scenario code and determine adventure type
 let scenarioCode = null
+let adventureType = 'Standalone Adventure' // Default
 
-// Pattern 1: Standard scenarios (PFS2 1-01, SFS2 #2-03, etc.)
-// Must come BEFORE other patterns to avoid false matches
-let match = eventData.event_title.match(/(?:PFS2?|SFS2?)[\s#-]*(\d+-\d+)/i)
-if (match) {
-  scenarioCode = match[0].toUpperCase().replace(/\s+/g, ' ')
-}
-
-// Pattern 2: Adventure Paths (PF2 AP 190, AP 163, etc.)
-// Only match if no standard scenario code found
-if (!scenarioCode) {
-  match = eventData.event_title.match(/(?:PF2?\s+)?AP\s+(\d+)/i)
+// Pattern 1: Quest
+if (eventData.event_title.match(/\bQuest\s+#?\d+/i)) {
+  const match = eventData.event_title.match(/\bQuest\s+#?(\d+)/i)
   if (match) {
-    scenarioCode = `PFS2 AP ${match[1]}`
-    eventData.adventure_type = 'Adventure Path'
+    scenarioCode = `${eventData.game_system} Quest ${match[1]}`
+    adventureType = 'Quest'
+    eventData.is_quest = true
   }
 }
 
-// Pattern 3: Intro scenarios - MUST be "Intro 1" or "Intro 2" as standalone
-// Not "Introduction" or "Intro:" which are just part of scenario titles
+// Pattern 2: Bounty
+if (!scenarioCode && eventData.event_title.match(/\bBounty\s+#?\d+/i)) {
+  const match = eventData.event_title.match(/\bBounty\s+#?(\d+)/i)
+  if (match) {
+    scenarioCode = `${eventData.game_system} Bounty ${match[1]}`
+    adventureType = 'Bounty'
+  }
+}
+
+// Pattern 3: Standard scenarios (PFS2 1-01, SFS2 #2-03, etc.)
 if (!scenarioCode) {
-  match = eventData.event_title.match(/\bIntro\s+([12])\b/i)
+  const match = eventData.event_title.match(/(?:PFS2?|SFS2?)[\s#-]*(\d+-\d+)/i)
+  if (match) {
+    scenarioCode = match[0].toUpperCase().replace(/\s+/g, ' ')
+    adventureType = 'Scenario'
+  }
+}
+
+// Pattern 4: Adventure Paths (PF2 AP 190, AP 163, etc.)
+if (!scenarioCode) {
+  const match = eventData.event_title.match(/(?:PF2?\s+)?AP\s+(\d+)/i)
+  if (match) {
+    scenarioCode = `PFS2 AP ${match[1]}`
+    adventureType = 'Adventure Path'
+  }
+}
+
+// Pattern 5: Intro scenarios (Intro 1, Intro 2)
+if (!scenarioCode) {
+  const match = eventData.event_title.match(/\bIntro\s+([12])\b/i)
   if (match) {
     const introNum = match[1]
     scenarioCode = `${eventData.game_system} 99-0${introNum}`
-    eventData.adventure_type = 'Intro Scenario'
+    adventureType = 'Scenario' // Intros are scenarios
   }
 }
 
@@ -112,11 +132,7 @@ if (scenarioCode) {
   eventData.scenario_code = scenarioCode
 }
 
-// Detect quest
-if (eventData.event_title.match(/\bquest\b/i)) {
-  eventData.is_quest = true
-  eventData.adventure_type = 'Quest'
-}
+eventData.adventure_type = adventureType
           
           // Check if event already exists (by warhorn_id)
           const { data: existing } = await supabase
