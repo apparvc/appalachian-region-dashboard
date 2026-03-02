@@ -81,6 +81,14 @@ if (eventData.event_title.match(/PFS2|Pathfinder.*2E|PF2 AP/i)) {
 let scenarioCode = null
 let adventureType = 'Standalone Adventure' // Default
 
+// Pattern 0: GM/Foundry Training (check FIRST)
+if (eventData.event_title.match(/\b(Foundry|VTT|Roll20|Fantasy Grounds)\s+Training\b/i) ||
+    eventData.event_title.match(/\bGM\s+(Training|Class|Workshop|School)\b/i) ||
+    eventData.event_title.match(/\bDM\s+(Training|Class|Workshop|School)\b/i)) {
+  adventureType = 'GM Training'
+  scenarioCode = null // Training doesn't have a scenario code
+}
+
 // Pattern 1: Quest
 if (eventData.event_title.match(/\bQuest\s+#?\d+/i)) {
   const match = eventData.event_title.match(/\bQuest\s+#?(\d+)/i)
