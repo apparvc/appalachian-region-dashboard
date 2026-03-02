@@ -71,9 +71,9 @@ if (eventData.event_title.match(/PFS2|Pathfinder.*2E|PF2 AP/i)) {
   eventData.game_system = 'PFS2'
 } else if (eventData.event_title.match(/SFS2|Starfinder.*2E|SF2/i)) {
   eventData.game_system = 'SFS2'
-} else if (eventData.event_title.match(/PFS1|PFS|Pathfinder.*1E|PF1/i)) {
+} else if (eventData.event_title.match(/PFS1|PFS(?!\d)|Pathfinder.*1E|PF1/i)) {
   eventData.game_system = 'PFS1'
-} else if (eventData.event_title.match(/SFS1|SFS|Starfinder.*1E|SF1/i)) {
+} else if (eventData.event_title.match(/SFS1|SFS(?!\d)|Starfinder.*1E|SF1/i)) {
   eventData.game_system = 'SFS1'
 }
 
@@ -81,21 +81,14 @@ if (eventData.event_title.match(/PFS2|Pathfinder.*2E|PF2 AP/i)) {
 let scenarioCode = null
 
 // Pattern 1: Standard scenarios (PFS2 1-01, SFS2 #2-03, etc.)
+// Must come BEFORE other patterns to avoid false matches
 let match = eventData.event_title.match(/(?:PFS2?|SFS2?)[\s#-]*(\d+-\d+)/i)
 if (match) {
   scenarioCode = match[0].toUpperCase().replace(/\s+/g, ' ')
 }
 
-// Pattern 2: Intro scenarios (Intro 1, Intro 2)
-if (!scenarioCode) {
-  match = eventData.event_title.match(/Intro\s+(\d+)/i)
-  if (match) {
-    const introNum = match[1]
-    scenarioCode = `${eventData.game_system} 99-0${introNum}`
-  }
-}
-
-// Pattern 3: Adventure Paths (AP 190, etc.)
+// Pattern 2: Adventure Paths (PF2 AP 190, AP 163, etc.)
+// Only match if no standard scenario code found
 if (!scenarioCode) {
   match = eventData.event_title.match(/(?:PF2?\s+)?AP\s+(\d+)/i)
   if (match) {
@@ -104,12 +97,23 @@ if (!scenarioCode) {
   }
 }
 
+// Pattern 3: Intro scenarios - MUST be "Intro 1" or "Intro 2" as standalone
+// Not "Introduction" or "Intro:" which are just part of scenario titles
+if (!scenarioCode) {
+  match = eventData.event_title.match(/\bIntro\s+([12])\b/i)
+  if (match) {
+    const introNum = match[1]
+    scenarioCode = `${eventData.game_system} 99-0${introNum}`
+    eventData.adventure_type = 'Intro Scenario'
+  }
+}
+
 if (scenarioCode) {
   eventData.scenario_code = scenarioCode
 }
 
 // Detect quest
-if (eventData.event_title.match(/quest/i)) {
+if (eventData.event_title.match(/\bquest\b/i)) {
   eventData.is_quest = true
   eventData.adventure_type = 'Quest'
 }
