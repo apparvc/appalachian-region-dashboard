@@ -1,0 +1,25 @@
+name: Scrape Warhorn Feeds
+
+on:
+  # Run twice daily
+  schedule:
+    - cron: '0 2 * * *'   # 2 AM UTC (9 PM ET / 10 PM ET depending on DST)
+    - cron: '0 14 * * *'  # 2 PM UTC (9 AM ET / 10 AM ET depending on DST)
+  
+  # Allow manual trigger
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Trigger Warhorn Scraper
+        run: |
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Content-Type: application/json" \
+            https://tgizvlyvefcypnhhawxw.supabase.co/functions/v1/scrape-warhorn
+      
+      - name: Log completion
+        run: echo "Warhorn scraper completed at $(date)"
