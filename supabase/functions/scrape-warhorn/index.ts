@@ -4,6 +4,87 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 // ICS parsing library
 import ICAL from 'https://esm.sh/ical.js@1.5.0'
 
+// Function to match venue from location string
+async function matchVenue(supabase: any, lodgeId: string, locationString: string | null) {
+  if (!locationString) return null;
+  
+  // Normalize for comparison
+  const normalize = (str: string) => str.toLowerCase()
+    .replace(/[&'.,\-()]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  
+  const normalizedLocation = normalize(locationString);
+  
+  // Check for virtual venues first
+  if (normalizedLocation.includes('foundry')) {
+    const { data } = await supabase
+      .from('venues')
+      .select('id')
+      .eq('lodge_id', lodgeId)
+      .ilike('name', '%Foundry%')
+      .single();
+    return data?.id || null;
+  }
+  
+  if (normalizedLocation.match(/discord|virtual|online|vtt/)) {
+    const { data } = await supabase
+      .from('venues')
+      .select('id')
+      .eq('lodge_id', lodgeId)
+      .eq('is_virtual', true)
+      .single();
+    return data?.id || null;
+  }
+  
+  // Get all physical venues for this lodge
+  const { data: venues } = await supabase
+    .from('venues')
+    .select('id, name, address, city')
+    .eq('lodge_id', lodgeId)
+    .eq('is_virtual', false);
+  
+  if (!venues) return null;
+  
+  // Try matching by key identifying words
+  for (const venue of venues) {
+    const normalizedVenueName = normalize(venue.name);
+    
+    // Extract key words from venue name (ignore common words)
+    const venueWords = normalizedVenueName
+      .split(' ')
+      .filter(word => !['the', 'and', 'or', 'of', 'in', 'at'].includes(word))
+      .filter(word => word.length >= 4); // Words 4+ chars
+    
+    // Check if location contains multiple key words from venue name
+    const matchCount = venueWords.filter(word => 
+      normalizedLocation.includes(word)
+    ).length;
+    
+    if (matchCount >= 2) { // At least 2 key words match
+      return venue.id;
+    }
+  }
+  
+  // Try city + one key word match
+  for (const venue of venues) {
+    if (venue.city && normalizedLocation.includes(normalize(venue.city))) {
+      const normalizedVenueName = normalize(venue.name);
+      const venueWords = normalizedVenueName.split(' ')
+        .filter(word => word.length >= 4);
+      
+      const hasKeyWord = venueWords.some(word => 
+        normalizedLocation.includes(word)
+      );
+      
+      if (hasKeyWord) {
+        return venue.id;
+      }
+    }
+  }
+  
+  return null; // No match found
+}
 serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
@@ -53,7 +134,7 @@ serve(async (req) => {
           const event = new ICAL.Event(vevent)
           
           // Extract event data
-          const eventData = {
+          const eventData: any = {
             lodge_id: lodge.id,
             source: 'warhorn_ics',
             warhorn_id: event.uid,
@@ -66,81 +147,87 @@ serve(async (req) => {
             last_seen: new Date().toISOString()
           }
           
+          // Match to venue
+          const venueId = await matchVenue(supabase, lodge.id, event.location);
+          if (venueId) {
+            eventData.venue_id = venueId;
+          }
+          
           // Detect game system FIRST
-if (eventData.event_title.match(/PFS2|Pathfinder.*2E|PF2 AP/i)) {
-  eventData.game_system = 'PFS2'
-} else if (eventData.event_title.match(/SFS2|Starfinder.*2E|SF2/i)) {
-  eventData.game_system = 'SFS2'
-} else if (eventData.event_title.match(/PFS1|PFS(?!\d)|Pathfinder.*1E|PF1/i)) {
-  eventData.game_system = 'PFS1'
-} else if (eventData.event_title.match(/SFS1|SFS(?!\d)|Starfinder.*1E|SF1/i)) {
-  eventData.game_system = 'SFS1'
-}
+          if (eventData.event_title.match(/PFS2|Pathfinder.*2E|PF2 AP/i)) {
+            eventData.game_system = 'PFS2'
+          } else if (eventData.event_title.match(/SFS2|Starfinder.*2E|SF2/i)) {
+            eventData.game_system = 'SFS2'
+          } else if (eventData.event_title.match(/PFS1|PFS(?!\d)|Pathfinder.*1E|PF1/i)) {
+            eventData.game_system = 'PFS1'
+          } else if (eventData.event_title.match(/SFS1|SFS(?!\d)|Starfinder.*1E|SF1/i)) {
+            eventData.game_system = 'SFS1'
+          }
 
-// Extract scenario code and determine adventure type
-let scenarioCode = null
-let adventureType = 'Standalone Adventure' // Default
+          // Extract scenario code and determine adventure type
+          let scenarioCode = null
+          let adventureType = 'Standalone Adventure' // Default
 
-// Pattern 0: GM/Foundry Training (check FIRST)
-if (eventData.event_title.match(/\b(Foundry|VTT|Roll20|Fantasy Grounds)\s+Training\b/i) ||
-    eventData.event_title.match(/\bGM\s+(Training|Class|Workshop|School)\b/i) ||
-    eventData.event_title.match(/\bDM\s+(Training|Class|Workshop|School)\b/i)) {
-  adventureType = 'GM Training'
-  scenarioCode = null // Training doesn't have a scenario code
-}
+          // Pattern 0: GM/Foundry Training (check FIRST)
+          if (eventData.event_title.match(/\b(Foundry|VTT|Roll20|Fantasy Grounds)\s+Training\b/i) ||
+              eventData.event_title.match(/\bGM\s+(Training|Class|Workshop|School)\b/i) ||
+              eventData.event_title.match(/\bDM\s+(Training|Class|Workshop|School)\b/i)) {
+            adventureType = 'GM Training'
+            scenarioCode = null // Training doesn't have a scenario code
+          }
 
-// Pattern 1: Quest
-if (eventData.event_title.match(/\bQuest\s+#?\d+/i)) {
-  const match = eventData.event_title.match(/\bQuest\s+#?(\d+)/i)
-  if (match) {
-    scenarioCode = `${eventData.game_system} Quest ${match[1]}`
-    adventureType = 'Quest'
-    eventData.is_quest = true
-  }
-}
+          // Pattern 1: Quest
+          if (!scenarioCode && eventData.event_title.match(/\bQuest\s+#?\d+/i)) {
+            const match = eventData.event_title.match(/\bQuest\s+#?(\d+)/i)
+            if (match) {
+              scenarioCode = `${eventData.game_system} Quest ${match[1]}`
+              adventureType = 'Quest'
+              eventData.is_quest = true
+            }
+          }
 
-// Pattern 2: Bounty
-if (!scenarioCode && eventData.event_title.match(/\bBounty\s+#?\d+/i)) {
-  const match = eventData.event_title.match(/\bBounty\s+#?(\d+)/i)
-  if (match) {
-    scenarioCode = `${eventData.game_system} Bounty ${match[1]}`
-    adventureType = 'Bounty'
-  }
-}
+          // Pattern 2: Bounty
+          if (!scenarioCode && eventData.event_title.match(/\bBounty\s+#?\d+/i)) {
+            const match = eventData.event_title.match(/\bBounty\s+#?(\d+)/i)
+            if (match) {
+              scenarioCode = `${eventData.game_system} Bounty ${match[1]}`
+              adventureType = 'Bounty'
+            }
+          }
 
-// Pattern 3: Standard scenarios (PFS2 1-01, SFS2 #2-03, etc.)
-if (!scenarioCode) {
-  const match = eventData.event_title.match(/(?:PFS2?|SFS2?)[\s#-]*(\d+-\d+)/i)
-  if (match) {
-    scenarioCode = match[0].toUpperCase().replace(/\s+/g, ' ')
-    adventureType = 'Scenario'
-  }
-}
+          // Pattern 3: Standard scenarios (PFS2 1-01, SFS2 #2-03, etc.)
+          if (!scenarioCode) {
+            const match = eventData.event_title.match(/(?:PFS2?|SFS2?)[\s#-]*(\d+-\d+)/i)
+            if (match) {
+              scenarioCode = match[0].toUpperCase().replace(/\s+/g, ' ')
+              adventureType = 'Scenario'
+            }
+          }
 
-// Pattern 4: Adventure Paths (PF2 AP 190, AP 163, etc.)
-if (!scenarioCode) {
-  const match = eventData.event_title.match(/(?:PF2?\s+)?AP\s+(\d+)/i)
-  if (match) {
-    scenarioCode = `PFS2 AP ${match[1]}`
-    adventureType = 'Adventure Path'
-  }
-}
+          // Pattern 4: Adventure Paths (PF2 AP 190, AP 163, etc.)
+          if (!scenarioCode) {
+            const match = eventData.event_title.match(/(?:PF2?\s+)?AP\s+(\d+)/i)
+            if (match) {
+              scenarioCode = `PFS2 AP ${match[1]}`
+              adventureType = 'Adventure Path'
+            }
+          }
 
-// Pattern 5: Intro scenarios (Intro 1, Intro 2)
-if (!scenarioCode) {
-  const match = eventData.event_title.match(/\bIntro\s+([12])\b/i)
-  if (match) {
-    const introNum = match[1]
-    scenarioCode = `${eventData.game_system} 99-0${introNum}`
-    adventureType = 'Scenario' // Intros are scenarios
-  }
-}
+          // Pattern 5: Intro scenarios (Intro 1, Intro 2)
+          if (!scenarioCode) {
+            const match = eventData.event_title.match(/\bIntro\s+([12])\b/i)
+            if (match) {
+              const introNum = match[1]
+              scenarioCode = `${eventData.game_system} 99-0${introNum}`
+              adventureType = 'Scenario' // Intros are scenarios
+            }
+          }
 
-if (scenarioCode) {
-  eventData.scenario_code = scenarioCode
-}
+          if (scenarioCode) {
+            eventData.scenario_code = scenarioCode
+          }
 
-eventData.adventure_type = adventureType
+          eventData.adventure_type = adventureType
           
           // Check if event already exists (by warhorn_id)
           const { data: existing } = await supabase
