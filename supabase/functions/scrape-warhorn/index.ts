@@ -46,30 +46,63 @@ async function matchVenue(supabase: any, lodgeId: string, locationString: string
   
   if (!venues) return null;
   
-  // Try matching by key identifying words
+  // PRIORITY 1: Check for venue name WITH city/location specifics in parentheses
+  // e.g., "Level Up Games (Johns Creek)" should only match if location contains "Johns Creek"
   for (const venue of venues) {
-    const normalizedVenueName = normalize(venue.name);
+    const venueNameMatch = venue.name.match(/^(.+?)\s*\((.+?)\)$/);
+    if (venueNameMatch) {
+      const baseName = venueNameMatch[1].trim();
+      const locationSpecific = venueNameMatch[2].trim();
+      
+      const normalizedBase = normalize(baseName);
+      const normalizedSpecific = normalize(locationSpecific);
+      
+      // Must match BOTH the base name AND the location-specific part
+      if (normalizedLocation.includes(normalizedBase) && 
+          normalizedLocation.includes(normalizedSpecific)) {
+        return venue.id;
+      }
+    }
+  }
+  
+  // PRIORITY 2: Match by address (most reliable)
+  for (const venue of venues) {
+    if (venue.address) {
+      const normalizedAddress = normalize(venue.address);
+      
+      // Extract street number and name for more precise matching
+      const addressParts = normalizedAddress.split(' ').slice(0, 3).join(' ');
+      
+      if (normalizedLocation.includes(addressParts)) {
+        return venue.id;
+      }
+    }
+  }
+  
+  // PRIORITY 3: Match venues WITHOUT location specifics (e.g., "Giga-Bites Cafe")
+  for (const venue of venues) {
+    // Skip venues with parentheses (already checked in Priority 1)
+    if (venue.name.includes('(')) continue;
     
-    // Extract key words from venue name (ignore common words)
+    const normalizedVenueName = normalize(venue.name);
     const venueWords = normalizedVenueName
       .split(' ')
       .filter(word => !['the', 'and', 'or', 'of', 'in', 'at'].includes(word))
-      .filter(word => word.length >= 4); // Words 4+ chars
+      .filter(word => word.length >= 4);
     
-    // Check if location contains multiple key words from venue name
     const matchCount = venueWords.filter(word => 
       normalizedLocation.includes(word)
     ).length;
     
-    if (matchCount >= 2) { // At least 2 key words match
+    if (matchCount >= 2) {
       return venue.id;
     }
   }
   
-  // Try city + one key word match
+  // PRIORITY 4: City + one key word match (fallback)
   for (const venue of venues) {
     if (venue.city && normalizedLocation.includes(normalize(venue.city))) {
-      const normalizedVenueName = normalize(venue.name);
+      const normalizedVenueName = normalize(venue.name.replace(/\s*\(.+?\)\s*/, '')); // Remove parentheses part
       const venueWords = normalizedVenueName.split(' ')
         .filter(word => word.length >= 4);
       
